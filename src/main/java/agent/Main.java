@@ -1,53 +1,55 @@
 package agent;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.util.Scanner;
 
 public class Main {
-    static final String API_URL = "https://api.anthropic.com/v1/messages";
-    static final String API_KEY = System.getenv("ANTHROPIC_API_KEY");
-    static final String MODEL   = "claude-haiku-4-5-20251001";
 
-    static final ObjectMapper mapper = new ObjectMapper();
-    static final HttpClient http   = HttpClient.newHttpClient();
+    static void main() throws Exception {
+        System.out.println("=== ShopEasy Customer Support ===");
+        System.out.println("Type your message (or 'quit' to exit)");
+        System.out.println("=================================\n");
 
-    public static void main(String[] args) throws Exception {
-        System.out.println("Testing API connection...");
+        // Wire everything together here — one place, easy to see the full picture
+        ObjectMapper  mapper   = new ObjectMapper();
+        ClaudeClient  client   = new ClaudeClient(System.getenv("ANTHROPIC_API_KEY"), mapper);
+        ToolRegistry  registry = new ToolRegistry(mapper);
+        ToolExecutor  executor = new ToolExecutor();
+        AgenticLoop   loop     = new AgenticLoop(client, registry, executor, mapper);
 
-        ObjectNode body = mapper.createObjectNode();
-        body.put("model", MODEL);
-        body.put("max_tokens", 100);
+        ArrayNode conversationHistory = mapper.createArrayNode();
+        Scanner   scanner             = new Scanner(System.in);
 
-        ArrayNode messages = mapper.createArrayNode();
-        ObjectNode msg = mapper.createObjectNode();
-        msg.put("role", "user");
-        msg.put("content", "Say exactly: API connection successful!");
-        messages.add(msg);
-        body.set("messages", messages);
+        while (true) {
+            System.out.print("You: ");
+            String userInput = scanner.nextLine().trim();
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(API_URL))
-                .header("Content-Type", "application/json")
-                .header("x-api-key", API_KEY)
-                .header("anthropic-version", "2023-06-01")
-                .POST(HttpRequest.BodyPublishers.ofString(
-                        mapper.writeValueAsString(body)))
-                .build();
+            if (userInput.equalsIgnoreCase("quit")) {
+                System.out.println("Goodbye!");
+                break;
+            }
+            if (userInput.isEmpty()) continue;
 
-        HttpResponse<String> response = http.send(
-                request, HttpResponse.BodyHandlers.ofString());
+            // Add user message to history
+            ObjectNode userMsg = mapper.createObjectNode();
+            userMsg.put("role",    "user");
+            userMsg.put("content", userInput);
+            conversationHistory.add(userMsg);
 
-        System.out.println("Raw API response: " + response.body());
+            // Run the loop and get a response
+            String response = loop.run(conversationHistory);
 
-        JsonNode result = mapper.readTree(response.body());
-        System.out.println("Claude says: " +
-                result.get("content").get(0).get("text").asText());
+            // Add Claude's response to history for next turn
+            ObjectNode assistantMsg = mapper.createObjectNode();
+            assistantMsg.put("role",    "assistant");
+            assistantMsg.put("content", response);
+            conversationHistory.add(assistantMsg);
+
+            System.out.println("\nAgent: " + response + "\n");
+        }
     }
+
 }
